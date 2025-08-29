@@ -1,4 +1,3 @@
-# utils.py
 import pandas as pd
 import requests
 import re
@@ -9,15 +8,34 @@ import functools
 import os
 import numpy as np
 
-# ---------- модель и морфологический разбор ----------
-
+# ---------- загрузка модели (гибкая) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
     """
-    Возвращает модель E5. Если у тебя есть локальная дообученная модель в папке 'fine_tuned_model',
-    можно поменять путь ниже: SentenceTransformer('fine_tuned_model').
+    1) Если есть локальная fine_tuned_model → используем её.
+    2) Если нет, пробуем скачать с Google Drive (по ID из env).
+    3) Если не удалось → fallback на HuggingFace (intfloat/multilingual-e5-small).
     """
-    # По умолчанию — современная мультиязычная E5 (компактная)
+    model_path = "fine_tuned_model"
+    model_zip = "fine_tuned_model.zip"
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
+
+    if os.path.exists(model_path):
+        print("✅ Используем локальную модель:", model_path)
+        return SentenceTransformer(model_path)
+
+    try:
+        print("📥 Пытаемся загрузить модель с Google Drive...")
+        import gdown, zipfile
+        gdown.download(f"https://drive.google.com/uc?id={gdrive_file_id}", model_zip, quiet=False)
+        with zipfile.ZipFile(model_zip, 'r') as zf:
+            zf.extractall(model_path)
+        print("✅ Модель успешно загружена!")
+        return SentenceTransformer(model_path)
+    except Exception as e:
+        print(f"⚠️ Ошибка загрузки с GDrive: {e}")
+        print("➡️ Используем fallback: intfloat/multilingual-e5-small")
+
     return SentenceTransformer("intfloat/multilingual-e5-small")
 
 @functools.lru_cache(maxsize=1)
@@ -25,7 +43,6 @@ def get_morph():
     return pymorphy2.MorphAnalyzer()
 
 # ---------- служебные функции ----------
-
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 
@@ -81,15 +98,13 @@ def load_excel(url):
     if not topic_cols:
         raise KeyError("Не найдены колонки topics")
 
-    df["topics"]      = df[topic_cols].astype(str).agg(lambda x: [v for v in x if v and v != "nan"], axis=1)
+    df["topics"] = df[topic_cols].astype(str).agg(lambda x: [v for v in x if v and v != "nan"], axis=1)
     df["phrase_full"] = df["phrase"]
     df["phrase_list"] = df["phrase"].apply(split_by_slash)
-    df                = df.explode("phrase_list", ignore_index=True)
-    df["phrase"]      = df["phrase_list"]
+    df = df.explode("phrase_list", ignore_index=True)
+    df["phrase"] = df["phrase_list"]
     df["phrase_proc"] = df["phrase"].apply(preprocess)
-    df["phrase_lemmas"] = df["phrase_proc"].apply(
-        lambda t: {lemmatize_cached(w) for w in re.findall(r"\w+", t)}
-    )
+    df["phrase_lemmas"] = df["phrase_proc"].apply(lambda t: {lemmatize_cached(w) for w in re.findall(r"\w+", t)})
 
     if "comment" not in df.columns:
         df["comment"] = ""
@@ -108,7 +123,6 @@ def load_all_excels():
     return pd.concat(dfs, ignore_index=True)
 
 # ---------- удаление дублей ----------
-
 def _score_of(item):
     return item[0] if len(item) == 4 else 1.0
 
@@ -118,61 +132,45 @@ def _phrase_full_of(item):
 def deduplicate_results(results):
     best = {}
     for item in results:
-        key   = _phrase_full_of(item)
+        key = _phrase_full_of(item)
         score = _score_of(item)
-
         if key not in best or score > _score_of(best[key]):
             best[key] = item
     return list(best.values())
 
 # ---------- поиск ----------
-
 def semantic_search(query, df, top_k=5, threshold=0.5):
-    """
-    Быстрый поиск на основе numpy:
-    - query кодируется с префиксом "query: "
-    - в df.attrs ожидаются 'phrase_embs' (numpy array, N x D) и 'phrase_embs_norms' (N,)
-    """
     model = get_model()
     query_proc = preprocess(query)
     query_emb = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype('float32')
 
-    # Нормируем и вычисляем косинусную схожесть через dot
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)
-
     if phrase_embs is None or phrase_embs.size == 0:
         return []
 
-    # Нормы для запроса
     q_norm = np.linalg.norm(query_emb)
     if q_norm == 0:
         q_norm = 1e-10
-    # Скаля́рные произведения (dot) между каждым passage и query
+
     sims = (phrase_embs @ query_emb) / (phrase_norms * q_norm)
-    # Обработка NaN/inf
     sims = np.nan_to_num(sims, neginf=0.0, posinf=0.0)
 
-    # Берём топ-K
     top_indices = np.argsort(sims)[::-1][:top_k]
     results = [
         (float(sims[idx]), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
         for idx in top_indices if float(sims[idx]) >= threshold
     ]
-    results = sorted(results, key=lambda x: x[0], reverse=True)[:top_k]
     return deduplicate_results(results)
 
 def keyword_search(query, df):
-    query_proc  = preprocess(query)
+    query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]
 
     matched = []
     for row in df.itertuples():
-        lemma_match = all(
-            any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas)
-            for ql in query_lemmas
-        )
+        lemma_match = all(any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas) for ql in query_lemmas)
         partial_match = all(q in row.phrase_proc for q in query_words)
         if lemma_match or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))

@@ -7,6 +7,7 @@ import pymorphy2
 import functools
 import os
 import numpy as np
+from collections import defaultdict
 
 # ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
@@ -41,29 +42,9 @@ def get_morph():
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 
-def lemmatize(word):
-    return get_morph().parse(word)[0].normal_form
-
 @functools.lru_cache(maxsize=10000)
 def lemmatize_cached(word):
-    return lemmatize(word)
-
-# Пример синонимов и форм глаголов
-SYNONYM_GROUPS = [
-    ["оплачивала", "оплатила", "платил", "платила"],
-]
-
-SYNONYM_DICT = {}
-for group in SYNONYM_GROUPS:
-    lemmas = {lemmatize(w.lower()) for w in group}
-    for lemma in lemmas:
-        SYNONYM_DICT[lemma] = lemmas
-
-GITHUB_CSV_URLS = [
-    "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
-    "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
-    "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data31.xlsx"
-]
+    return get_morph().parse(word)[0].normal_form
 
 def split_by_slash(phrase: str):
     phrase = phrase.strip()
@@ -86,6 +67,12 @@ def split_by_slash(phrase: str):
         else:
             parts.append(segment)
     return [p for p in parts if p]
+
+GITHUB_CSV_URLS = [
+    "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
+    "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
+    "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data31.xlsx"
+]
 
 def load_excel(url):
     resp = requests.get(url)
@@ -137,61 +124,55 @@ def deduplicate_results(results):
             best[key] = item
     return list(best.values())
 
+# ---------- построение словаря форм ----------
+def build_forms_dict(df):
+    forms_dict = defaultdict(set)
+    for row in df.itertuples():
+        for lemma in row.phrase_lemmas:
+            forms_dict[lemma].add(lemma)
+    return forms_dict
+
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.4):
-    """
-    Гибридный поиск с двумя векторами:
-    - с префиксом "query:"
-    - без префикса
-    """
     model = get_model()
     query_proc = preprocess(query)
 
-    # --- 1. С префиксом ---
     query_emb_pref = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype("float32")
-
-    # --- 2. Без префикса ---
     query_emb_raw = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
 
-    # --- База ---
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)
     if phrase_embs is None or phrase_embs.size == 0:
         return []
 
-    # --- Нормы ---
     q_norm_pref = np.linalg.norm(query_emb_pref) or 1e-10
     q_norm_raw  = np.linalg.norm(query_emb_raw) or 1e-10
 
-    # --- Сходства ---
     sims_pref = (phrase_embs @ query_emb_pref) / (phrase_norms * q_norm_pref)
     sims_raw  = (phrase_embs @ query_emb_raw) / (phrase_norms * q_norm_raw)
 
-    # --- Гибрид ---
     sims = (sims_pref + sims_raw) / 2
     sims = np.nan_to_num(sims, neginf=0.0, posinf=0.0)
 
-    # --- Отбор кандидатов ---
     top_indices = np.argsort(sims)[::-1][:top_k * 3]
     results = [
         (float(sims[idx]), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
         for idx in top_indices if float(sims[idx]) >= threshold
     ]
-
     return deduplicate_results(results[:top_k])
 
 def keyword_search(query, df):
-    """
-    Улучшенный точный поиск с лемматизацией и синонимами
-    """
     query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]
 
+    # --- строим forms_dict из df ---
+    forms_dict = build_forms_dict(df)
+
     matched = []
     for row in df.itertuples():
         lemma_match = all(
-            any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas)
+            any(ql in forms_dict.get(pl, {pl}) for pl in row.phrase_lemmas)
             for ql in query_lemmas
         )
         partial_match = all(q in row.phrase_proc for q in query_words)

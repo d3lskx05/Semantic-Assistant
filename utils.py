@@ -8,14 +8,9 @@ import functools
 import os
 import numpy as np
 
-# ---------- загрузка модели (гибкая) ----------
+# ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    """
-    1) Если есть локальная fine_tuned_model → используем её.
-    2) Если нет, пробуем скачать с Google Drive (по ID из env).
-    3) Если не удалось → fallback на HuggingFace (intfloat/multilingual-e5-small).
-    """
     model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
     gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
@@ -53,7 +48,11 @@ def lemmatize(word):
 def lemmatize_cached(word):
     return lemmatize(word)
 
-SYNONYM_GROUPS = []
+# Пример синонимов и форм глаголов
+SYNONYM_GROUPS = [
+    ["оплачивала", "оплатила", "платил", "платила"],
+]
+
 SYNONYM_DICT = {}
 for group in SYNONYM_GROUPS:
     lemmas = {lemmatize(w.lower()) for w in group}
@@ -139,34 +138,51 @@ def deduplicate_results(results):
     return list(best.values())
 
 # ---------- поиск ----------
-def semantic_search(query, df, top_k=5, threshold=0.5):
+def semantic_search(query, df, top_k=5, threshold=0.4):
+    """
+    Гибридный поиск с двумя векторами:
+    - с префиксом "query:"
+    - без префикса
+    """
     model = get_model()
     query_proc = preprocess(query)
-    query_emb = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype('float32')
 
+    # --- 1. С префиксом ---
+    query_emb_pref = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype("float32")
+
+    # --- 2. Без префикса ---
+    query_emb_raw = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+
+    # --- База ---
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)
     if phrase_embs is None or phrase_embs.size == 0:
         return []
 
-    q_norm = np.linalg.norm(query_emb)
-    if q_norm == 0:
-        q_norm = 1e-10
+    # --- Нормы ---
+    q_norm_pref = np.linalg.norm(query_emb_pref) or 1e-10
+    q_norm_raw  = np.linalg.norm(query_emb_raw) or 1e-10
 
-    sims = (phrase_embs @ query_emb) / (phrase_norms * q_norm)
+    # --- Сходства ---
+    sims_pref = (phrase_embs @ query_emb_pref) / (phrase_norms * q_norm_pref)
+    sims_raw  = (phrase_embs @ query_emb_raw) / (phrase_norms * q_norm_raw)
+
+    # --- Гибрид ---
+    sims = (sims_pref + sims_raw) / 2
     sims = np.nan_to_num(sims, neginf=0.0, posinf=0.0)
 
-    top_indices = np.argsort(sims)[::-1][:top_k]
+    # --- Отбор кандидатов ---
+    top_indices = np.argsort(sims)[::-1][:top_k * 3]
     results = [
         (float(sims[idx]), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
         for idx in top_indices if float(sims[idx]) >= threshold
     ]
-    return deduplicate_results(results)
 
-def keyword_search(query, df, match_ratio=0.6):
+    return deduplicate_results(results[:top_k])
+
+def keyword_search(query, df):
     """
-    Поиск по ключевым словам с учетом лемм и частичных совпадений,
-    но с порогом совпадений для фильтрации нерелевантных фраз.
+    Улучшенный точный поиск с лемматизацией и синонимами
     """
     query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
@@ -174,14 +190,12 @@ def keyword_search(query, df, match_ratio=0.6):
 
     matched = []
     for row in df.itertuples():
-        matched_count = sum(
-            1 for ql in query_lemmas
-            if any(ql in pl or pl in ql for pl in row.phrase_lemmas)
+        lemma_match = all(
+            any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas)
+            for ql in query_lemmas
         )
-        ratio = matched_count / max(len(query_lemmas), 1)
         partial_match = all(q in row.phrase_proc for q in query_words)
-
-        if ratio >= match_ratio or partial_match:
+        if lemma_match or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))
 
     return deduplicate_results(matched)

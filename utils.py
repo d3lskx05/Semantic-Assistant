@@ -8,7 +8,7 @@ import functools
 import os
 import numpy as np
 
-# ---------- загрузка модели ----------
+# ---------- загрузка модели (гибкая) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
     """
@@ -38,11 +38,9 @@ def get_model():
 
     return SentenceTransformer("intfloat/multilingual-e5-small")
 
-
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
-
 
 # ---------- служебные функции ----------
 def preprocess(text):
@@ -55,7 +53,6 @@ def lemmatize(word):
 def lemmatize_cached(word):
     return lemmatize(word)
 
-
 SYNONYM_GROUPS = []
 SYNONYM_DICT = {}
 for group in SYNONYM_GROUPS:
@@ -63,13 +60,11 @@ for group in SYNONYM_GROUPS:
     for lemma in lemmas:
         SYNONYM_DICT[lemma] = lemmas
 
-
 GITHUB_CSV_URLS = [
     "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data31.xlsx"
 ]
-
 
 def split_by_slash(phrase: str):
     phrase = phrase.strip()
@@ -92,7 +87,6 @@ def split_by_slash(phrase: str):
         else:
             parts.append(segment)
     return [p for p in parts if p]
-
 
 def load_excel(url):
     resp = requests.get(url)
@@ -117,7 +111,6 @@ def load_excel(url):
 
     return df[["phrase", "phrase_proc", "phrase_full", "phrase_lemmas", "topics", "comment"]]
 
-
 def load_all_excels():
     dfs = []
     for url in GITHUB_CSV_URLS:
@@ -128,7 +121,6 @@ def load_all_excels():
     if not dfs:
         raise ValueError("Не удалось загрузить ни одного файла")
     return pd.concat(dfs, ignore_index=True)
-
 
 # ---------- удаление дублей ----------
 def _score_of(item):
@@ -145,7 +137,6 @@ def deduplicate_results(results):
         if key not in best or score > _score_of(best[key]):
             best[key] = item
     return list(best.values())
-
 
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.5):
@@ -172,22 +163,25 @@ def semantic_search(query, df, top_k=5, threshold=0.5):
     ]
     return deduplicate_results(results)
 
-
-def keyword_search(query, df):
+def keyword_search(query, df, match_ratio=0.6):
+    """
+    Поиск по ключевым словам с учетом лемм и частичных совпадений,
+    но с порогом совпадений для фильтрации нерелевантных фраз.
+    """
     query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]
 
     matched = []
     for row in df.itertuples():
-        # Частичные совпадения лемм
-        lemma_match = all(
-            any(ql in pl or pl in ql for pl in row.phrase_lemmas)
-            for ql in query_lemmas
+        matched_count = sum(
+            1 for ql in query_lemmas
+            if any(ql in pl or pl in ql for pl in row.phrase_lemmas)
         )
-        # Полное совпадение слов в обработанном тексте
+        ratio = matched_count / max(len(query_lemmas), 1)
         partial_match = all(q in row.phrase_proc for q in query_words)
-        if lemma_match or partial_match:
+
+        if ratio >= match_ratio or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))
 
     return deduplicate_results(matched)

@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 from utils import load_all_excels, semantic_search, keyword_search, get_model
 import numpy as np
@@ -9,8 +8,8 @@ st.title("🤖 Проверка фраз")
 @st.cache_data(show_spinner=False)
 def get_data(batch_size: int = 128):
     """
-    Загружает все Excel'и, кодирует фразы батчами с префиксом "passage: "
-    и сохраняет эмбеддинги (numpy float32) и их L2-нормы в атрибуты DF.
+    Загружает Excel-данные, кодирует фразы батчами (с префиксом "passage:")
+    и сохраняет эмбеддинги + нормы для быстрого поиска.
     """
     df = load_all_excels()
     model = get_model()
@@ -18,21 +17,17 @@ def get_data(batch_size: int = 128):
     # Добавляем префикс passage: для E5
     phrases = [f"passage: {p}" for p in df['phrase_proc'].tolist()]
 
-    # Batch encoding -> сохраняем как numpy.float32
+    # Batch encoding -> numpy.float32
     embeddings_list = []
     for i in range(0, len(phrases), batch_size):
         batch = phrases[i:i+batch_size]
         batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
         embeddings_list.append(batch_embs.astype('float32'))
 
-    if embeddings_list:
-        embeddings = np.vstack(embeddings_list)
-    else:
-        embeddings = np.zeros((0, model.get_sentence_embedding_dimension()), dtype='float32')
+    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype='float32')
 
-    # Предвычисляем нормы (L2), чтобы ускорить косинусную схожесть
+    # Предвычисляем L2-нормы
     norms = np.linalg.norm(embeddings, axis=1)
-    # На случай нулевых векторов — чтобы не делить на 0
     norms[norms == 0] = 1e-10
 
     df.attrs['phrase_embs'] = embeddings
@@ -69,12 +64,11 @@ query = st.text_input("Введите ваш запрос:")
 if query:
     try:
         search_df = df
-        # Если включен фильтр тем и выбраны темы — отбираем строки
+        # Фильтр по тематикам
         if filter_search_by_topics and selected_topics:
             mask = df['topics'].apply(lambda topics: any(t in selected_topics for t in topics))
             search_df = df[mask].reset_index(drop=True)
 
-            # Согласуем эмбеддинги с фильтрованным DF (срез numpy)
             full_embs = df.attrs.get('phrase_embs', None)
             full_norms = df.attrs.get('phrase_embs_norms', None)
             if full_embs is not None and full_norms is not None:
@@ -83,17 +77,16 @@ if query:
                     search_df.attrs['phrase_embs'] = full_embs[indices]
                     search_df.attrs['phrase_embs_norms'] = full_norms[indices]
                 else:
-                    # пустой срез
                     emb_dim = full_embs.shape[1] if full_embs.size else 0
                     search_df.attrs['phrase_embs'] = np.zeros((0, emb_dim), dtype='float32')
                     search_df.attrs['phrase_embs_norms'] = np.zeros((0,), dtype='float32')
         else:
-            # при отсутствии фильтра используем весь набор (вместо копирования — даём доступ)
             search_df = df
 
         if search_df.empty:
             st.warning("Нет данных для поиска по выбранным тематикам.")
         else:
+            # Умный поиск
             results = semantic_search(query, search_df)
             if results:
                 st.markdown("### 🔍 Результаты умного поиска:")
@@ -113,6 +106,7 @@ if query:
             else:
                 st.warning("Совпадений не найдено в умном поиске.")
 
+            # Точный поиск
             exact_results = keyword_search(query, search_df)
             if exact_results:
                 st.markdown("### 🧷 Точный поиск:")

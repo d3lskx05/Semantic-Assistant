@@ -8,14 +8,9 @@ import functools
 import os
 import numpy as np
 
-# ---------- загрузка модели (гибкая) ----------
+# ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    """
-    1) Если есть локальная fine_tuned_model → используем её.
-    2) Если нет, пробуем скачать с Google Drive (по ID из env).
-    3) Если не удалось → fallback на HuggingFace (intfloat/multilingual-e5-small).
-    """
     model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
     gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
@@ -53,7 +48,11 @@ def lemmatize(word):
 def lemmatize_cached(word):
     return lemmatize(word)
 
-SYNONYM_GROUPS = []
+# Пример синонимов и форм глаголов
+SYNONYM_GROUPS = [
+    ["оплачивала", "оплатила", "платил", "платила"],
+]
+
 SYNONYM_DICT = {}
 for group in SYNONYM_GROUPS:
     lemmas = {lemmatize(w.lower()) for w in group}
@@ -139,14 +138,12 @@ def deduplicate_results(results):
     return list(best.values())
 
 # ---------- поиск ----------
-def semantic_search(query, df, top_k=5, threshold=0.5):
+def semantic_search(query, df, top_k=5, threshold=0.4):
     """
-    Гибридный семантический поиск:
-    - Считаем сходство с префиксом (E5-режим: "query: ...")
-    - Считаем сходство без префикса (универсальный режим)
-    - Усредняем оба результата
+    Гибридный поиск с двумя векторами:
+    - с префиксом "query:"
+    - без префикса
     """
-
     model = get_model()
     query_proc = preprocess(query)
 
@@ -184,13 +181,19 @@ def semantic_search(query, df, top_k=5, threshold=0.5):
     return deduplicate_results(results[:top_k])
 
 def keyword_search(query, df):
+    """
+    Улучшенный точный поиск с лемматизацией и синонимами
+    """
     query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]
 
     matched = []
     for row in df.itertuples():
-        lemma_match = all(any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas) for ql in query_lemmas)
+        lemma_match = all(
+            any(ql in SYNONYM_DICT.get(pl, {pl}) for pl in row.phrase_lemmas)
+            for ql in query_lemmas
+        )
         partial_match = all(q in row.phrase_proc for q in query_words)
         if lemma_match or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))

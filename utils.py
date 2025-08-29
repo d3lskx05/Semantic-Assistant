@@ -139,50 +139,29 @@ def deduplicate_results(results):
     return list(best.values())
 
 # ---------- поиск ----------
-def semantic_search(
-    query: str,
-    df: pd.DataFrame,
-    top_k: int = 5,
-    threshold: float = 0.5
-):
-    """
-    Гибридный семантический поиск:
-    - Использует E5-префиксы ("query:" / "passage:")
-    - Параллельно считает сходство без префиксов
-    - Усредняет оба результата
-    - Делает мягкую фильтрацию (оставляем запас кандидатов)
-    """
-
-    # --- Подготовка запроса ---
+def semantic_search(query, df, top_k=5, threshold=0.5):
+    model = get_model()
     query_proc = preprocess(query)
+    query_emb = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype('float32')
 
-    # 1. Вариант с префиксом (основной, как требует E5)
-    query_emb_pref = model.encode(f"query: {query_proc}", normalize_embeddings=False)
-    sim_pref = (df.attrs['phrase_embs'] @ query_emb_pref) / (
-        df.attrs['phrase_norms'] * np.linalg.norm(query_emb_pref)
-    )
+    phrase_embs = df.attrs.get("phrase_embs", None)
+    phrase_norms = df.attrs.get("phrase_embs_norms", None)
+    if phrase_embs is None or phrase_embs.size == 0:
+        return []
 
-    # 2. Вариант без префикса (альтернативный)
-    query_emb_raw = model.encode(query_proc, normalize_embeddings=False)
-    sim_raw = (df.attrs['phrase_embs'] @ query_emb_raw) / (
-        df.attrs['phrase_norms'] * np.linalg.norm(query_emb_raw)
-    )
+    q_norm = np.linalg.norm(query_emb)
+    if q_norm == 0:
+        q_norm = 1e-10
 
-    # 3. Гибрид: усреднение (можно подстроить веса)
-    sim = (sim_pref + sim_raw) / 2
+    sims = (phrase_embs @ query_emb) / (phrase_norms * q_norm)
+    sims = np.nan_to_num(sims, neginf=0.0, posinf=0.0)
 
-    # --- Формируем кандидатов ---
+    top_indices = np.argsort(sims)[::-1][:top_k]
     results = [
-        (float(score), df.iloc[i].to_dict())
-        for i, score in enumerate(sim)
-        if score >= threshold or i < top_k * 3  # запас кандидатов
+        (float(sims[idx]), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
+        for idx in top_indices if float(sims[idx]) >= threshold
     ]
-
-    # --- Сортировка по релевантности ---
-    results.sort(key=lambda x: x[0], reverse=True)
-
-    # --- Обрезаем по top_k ---
-    return results[:top_k]
+    return deduplicate_results(results)
 
 def keyword_search(query, df):
     query_proc = preprocess(query)

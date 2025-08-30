@@ -7,26 +7,57 @@ import pymorphy2
 import functools
 import os
 import numpy as np
-import time
-import psutil
+
+# ---------- Глобальный флаг использования префиксов ----------
+MODEL_ADD_PREFIX = True  # Меняем вручную True/False
+
+# ---------- Обёртка модели ----------
+class ModelWrapper:
+    def __init__(self, model, add_prefix=True):
+        self.model = model
+        self.add_prefix = add_prefix
+
+    def encode(self, texts, **kwargs):
+        if self.add_prefix:
+            if isinstance(texts, str):
+                texts = f"passage: {texts}"
+            else:
+                texts = [f"passage: {t}" for t in texts]
+        return self.model.encode(texts, **kwargs)
+
+    def get_sentence_embedding_dimension(self):
+        return self.model.get_sentence_embedding_dimension()
 
 # ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "intfloat/multilingual-e5-small"  # <- сюда можно поставить свою fine-tuned модель
-    model = SentenceTransformer(model_path)
+    model_path = "fine_tuned_model"
+    model_zip = "fine_tuned_model.zip"
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
 
-    # ---------- Ручная настройка ----------
-    model.add_prefix = True   # <- меняешь на True или False
-    model.name_for_logs = str(model_path)
+    if os.path.exists(model_path):
+        print("✅ Используем локальную модель:", model_path)
+        return ModelWrapper(SentenceTransformer(model_path), add_prefix=MODEL_ADD_PREFIX)
 
-    return model
+    try:
+        print("📥 Пытаемся загрузить модель с Google Drive...")
+        import gdown, zipfile
+        gdown.download(f"https://drive.google.com/uc?id={gdrive_file_id}", model_zip, quiet=False)
+        with zipfile.ZipFile(model_zip, 'r') as zf:
+            zf.extractall(model_path)
+        print("✅ Модель успешно загружена!")
+        return ModelWrapper(SentenceTransformer(model_path), add_prefix=MODEL_ADD_PREFIX)
+    except Exception as e:
+        print(f"⚠️ Ошибка загрузки с GDrive: {e}")
+        print("➡️ Используем fallback: intfloat/multilingual-e5-small")
+
+    return ModelWrapper(SentenceTransformer("intfloat/multilingual-e5-base"), add_prefix=MODEL_ADD_PREFIX)
 
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
 
-# ---------- текстовые функции ----------
+# ---------- служебные функции ----------
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 
@@ -37,7 +68,6 @@ def lemmatize(word):
 def lemmatize_cached(word):
     return lemmatize(word)
 
-# ---------- синонимы ----------
 SYNONYM_GROUPS = [
     ["оплачивала", "оплатила", "платил", "платила"],
 ]
@@ -48,7 +78,6 @@ for group in SYNONYM_GROUPS:
     for lemma in lemmas:
         SYNONYM_DICT[lemma] = lemmas
 
-# ---------- работа с Excel ----------
 GITHUB_CSV_URLS = [
     "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
@@ -111,83 +140,41 @@ def load_all_excels():
         raise ValueError("Не удалось загрузить ни одного файла")
     return pd.concat(dfs, ignore_index=True)
 
-# ---------- удаление дублей ----------
-def _score_of(item):
-    return item[0] if len(item) == 4 else 1.0
-
-def _phrase_full_of(item):
-    return item[1] if len(item) == 4 else item[0]
-
-def deduplicate_results(results):
-    best = {}
-    for item in results:
-        key = _phrase_full_of(item)
-        score = _score_of(item)
-        if key not in best or score > _score_of(best[key]):
-            best[key] = item
-    return list(best.values())
-
-# ---------- вычисление эмбеддингов ----------
-def compute_phrase_embeddings(df, batch_size: int = 128):
+# ---------- Пересчёт эмбеддингов ----------
+def compute_phrase_embeddings(df, batch_size=128):
     model = get_model()
-    add_prefix = model.add_prefix
-
-    start_time = time.time()
-    if add_prefix:
-        phrases = [f"passage: {p}" for p in df['phrase_proc'].tolist()]
-    else:
-        phrases = df['phrase_proc'].tolist()
+    phrases = df['phrase_proc'].tolist()
+    if model.add_prefix:
+        phrases = [f"passage: {p}" for p in phrases]
 
     embeddings_list = []
     for i in range(0, len(phrases), batch_size):
         batch = phrases[i:i+batch_size]
         batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
-        embeddings_list.append(batch_embs.astype("float32"))
+        embeddings_list.append(batch_embs.astype('float32'))
 
-    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype="float32")
+    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype='float32')
     norms = np.linalg.norm(embeddings, axis=1)
     norms[norms == 0] = 1e-10
 
-    df.attrs["phrase_embs"] = embeddings
-    df.attrs["phrase_embs_norms"] = norms
-    elapsed = time.time() - start_time
-
-    # CPU/RAM текущего процесса
-    process = psutil.Process(os.getpid())
-    cpu = process.cpu_percent(interval=0.1)
-    ram = process.memory_info().rss / (1024 * 1024)
-
-    return {
-        "model": model.name_for_logs,
-        "add_prefix": add_prefix,
-        "num_phrases": len(df),
-        "time_sec": round(elapsed, 2),
-        "cpu_percent": cpu,
-        "ram_mb": round(ram, 1)
-    }
+    df.attrs['phrase_embs'] = embeddings
+    df.attrs['phrase_embs_norms'] = norms
+    return df
 
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.4):
     model = get_model()
     query_proc = preprocess(query)
 
-    if model.add_prefix:
-        query_emb_pref = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype("float32")
-        query_emb_raw = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
-    else:
-        query_emb_pref = query_emb_raw = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+    query_emb = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
 
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)
     if phrase_embs is None or phrase_embs.size == 0:
         return []
 
-    q_norm_pref = np.linalg.norm(query_emb_pref) or 1e-10
-    q_norm_raw  = np.linalg.norm(query_emb_raw) or 1e-10
-
-    sims_pref = (phrase_embs @ query_emb_pref) / (phrase_norms * q_norm_pref)
-    sims_raw  = (phrase_embs @ query_emb_raw) / (phrase_norms * q_norm_raw)
-    sims = (sims_pref + sims_raw) / 2
+    q_norm = np.linalg.norm(query_emb) or 1e-10
+    sims = (phrase_embs @ query_emb) / (phrase_norms * q_norm)
     sims = np.nan_to_num(sims, neginf=0.0, posinf=0.0)
 
     top_indices = np.argsort(sims)[::-1][:top_k * 3]
@@ -195,8 +182,7 @@ def semantic_search(query, df, top_k=5, threshold=0.4):
         (float(sims[idx]), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
         for idx in top_indices if float(sims[idx]) >= threshold
     ]
-
-    return deduplicate_results(results[:top_k])
+    return results[:top_k]
 
 def keyword_search(query, df):
     query_proc = preprocess(query)
@@ -212,5 +198,4 @@ def keyword_search(query, df):
         partial_match = all(q in row.phrase_proc for q in query_words)
         if lemma_match or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))
-
-    return deduplicate_results(matched)
+    return matched

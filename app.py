@@ -1,40 +1,28 @@
 import streamlit as st
-from utils import load_all_excels, semantic_search, keyword_search, get_model
+from utils import load_all_excels, compute_phrase_embeddings, semantic_search, keyword_search, get_model
 import numpy as np
 
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")
 
+# Загружаем данные и пересчитываем эмбеддинги
 @st.cache_data(show_spinner=False)
-def get_data(batch_size: int = 128):
-    """
-    Загружает Excel-данные, кодирует фразы батчами (с префиксом "passage:")
-    и сохраняет эмбеддинги + нормы для быстрого поиска.
-    """
+def get_data():
     df = load_all_excels()
-    model = get_model()
+    log_info = compute_phrase_embeddings(df)
+    return df, log_info
 
-    # Добавляем префикс passage: для E5
-    phrases = [f"passage: {p}" for p in df['phrase_proc'].tolist()]
+df, log_info = get_data()
 
-    # Batch encoding -> numpy.float32
-    embeddings_list = []
-    for i in range(0, len(phrases), batch_size):
-        batch = phrases[i:i+batch_size]
-        batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
-        embeddings_list.append(batch_embs.astype('float32'))
-
-    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype='float32')
-
-    # Предвычисляем L2-нормы
-    norms = np.linalg.norm(embeddings, axis=1)
-    norms[norms == 0] = 1e-10
-
-    df.attrs['phrase_embs'] = embeddings
-    df.attrs['phrase_embs_norms'] = norms
-    return df
-
-df = get_data()
+# ✅ Логирование в sidebar
+with st.sidebar:
+    st.markdown("### 🔍 Отладочная информация")
+    st.write(f"**Модель:** {log_info['model']}")
+    st.write(f"**add_prefix:** {log_info['add_prefix']}")
+    st.write(f"**Фраз загружено:** {log_info['num_phrases']}")
+    st.write(f"**Пересчёт занял:** {log_info['time_sec']} сек")
+    st.write(f"**CPU:** {log_info['cpu_percent']}%")
+    st.write(f"**RAM:** {log_info['ram_mb']} MB")
 
 # 🔘 Все уникальные тематики
 all_topics = sorted({topic for topics in df['topics'] for topic in topics})

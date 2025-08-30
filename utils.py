@@ -9,21 +9,22 @@ import os
 import numpy as np
 import time
 
-# ---------- глобальные настройки ----------
+# ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "fine_tuned_model",   # путь или huggingface id
-    "add_prefix": True            # управляемое поведение (True/False)
+    "name": "intfloat/multilingual-e5-base",  # будет заменяться при загрузке
+    "add_prefix": True                        # True = использовать query:/passage:, False = чистый текст
 }
 
 # ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = MODEL_CONFIG["name"]
+    model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
-    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "")
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
 
     if os.path.exists(model_path):
         print("✅ Используем локальную модель:", model_path)
+        MODEL_CONFIG["name"] = model_path
         return SentenceTransformer(model_path)
 
     try:
@@ -33,13 +34,14 @@ def get_model():
         with zipfile.ZipFile(model_zip, 'r') as zf:
             zf.extractall(model_path)
         print("✅ Модель успешно загружена!")
+        MODEL_CONFIG["name"] = model_path
         return SentenceTransformer(model_path)
     except Exception as e:
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        print("➡️ Используем fallback: intfloat/multilingual-e5-small")
-        MODEL_CONFIG["name"] = "intfloat/multilingual-e5-small"
-
-    return SentenceTransformer(MODEL_CONFIG["name"])
+        fallback = "intfloat/multilingual-e5-small"
+        print("➡️ Используем fallback:", fallback)
+        MODEL_CONFIG["name"] = fallback
+        return SentenceTransformer(fallback)
 
 @functools.lru_cache(maxsize=1)
 def get_morph():
@@ -56,7 +58,7 @@ def lemmatize(word):
 def lemmatize_cached(word):
     return lemmatize(word)
 
-# Пример синонимов и форм глаголов
+# Синонимы
 SYNONYM_GROUPS = [
     ["оплачивала", "оплатила", "платил", "платила"],
 ]
@@ -67,6 +69,7 @@ for group in SYNONYM_GROUPS:
     for lemma in lemmas:
         SYNONYM_DICT[lemma] = lemmas
 
+# ---------- загрузка Excel ----------
 GITHUB_CSV_URLS = [
     "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
@@ -75,7 +78,7 @@ GITHUB_CSV_URLS = [
 
 def split_by_slash(phrase: str):
     phrase = phrase.strip()
-    parts  = []
+    parts = []
     for segment in phrase.split("|"):
         segment = segment.strip()
         if "/" in segment:
@@ -131,11 +134,8 @@ def load_all_excels():
 
 # ---------- пересчёт эмбеддингов ----------
 def compute_phrase_embeddings(df, batch_size: int = 128):
-    """
-    Пересчитывает эмбеддинги для текущей модели и флага add_prefix.
-    """
     model = get_model()
-    start_time = time.time()
+    start = time.time()
 
     if MODEL_CONFIG["add_prefix"]:
         phrases = [f"passage: {p}" for p in df['phrase_proc'].tolist()]
@@ -146,19 +146,17 @@ def compute_phrase_embeddings(df, batch_size: int = 128):
     for i in range(0, len(phrases), batch_size):
         batch = phrases[i:i+batch_size]
         batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
-        embeddings_list.append(batch_embs.astype('float32'))
+        embeddings_list.append(batch_embs.astype("float32"))
 
-    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros(
-        (0, model.get_sentence_embedding_dimension()), dtype='float32'
-    )
+    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype="float32")
+
     norms = np.linalg.norm(embeddings, axis=1)
     norms[norms == 0] = 1e-10
 
-    df.attrs['phrase_embs'] = embeddings
-    df.attrs['phrase_embs_norms'] = norms
-    df.attrs['embedding_time'] = round(time.time() - start_time, 3)
-    df.attrs['emb_count'] = len(df)
-
+    df.attrs["phrase_embs"] = embeddings
+    df.attrs["phrase_embs_norms"] = norms
+    df.attrs["emb_dim"] = embeddings.shape[1] if embeddings.size else 0
+    df.attrs["embedding_time"] = time.time() - start
     return df
 
 # ---------- удаление дублей ----------
@@ -179,16 +177,15 @@ def deduplicate_results(results):
 
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.4):
-    """
-    Семантический поиск с учётом флага add_prefix.
-    """
     model = get_model()
     query_proc = preprocess(query)
 
     if MODEL_CONFIG["add_prefix"]:
-        query_emb = model.encode(f"query: {query_proc}", convert_to_numpy=True, show_progress_bar=False).astype("float32")
+        query_text = f"query: {query_proc}"
     else:
-        query_emb = model.encode(query_proc, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+        query_text = query_proc
+
+    query_emb = model.encode(query_text, convert_to_numpy=True, show_progress_bar=False).astype("float32")
 
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)
@@ -208,9 +205,6 @@ def semantic_search(query, df, top_k=5, threshold=0.4):
     return deduplicate_results(results[:top_k])
 
 def keyword_search(query, df):
-    """
-    Улучшенный точный поиск с лемматизацией и синонимами
-    """
     query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]

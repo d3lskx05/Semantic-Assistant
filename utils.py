@@ -132,6 +132,7 @@ def compute_phrase_embeddings(df, batch_size: int = 128):
     model = get_model()
     add_prefix = model.add_prefix
 
+    start_time = time.time()
     if add_prefix:
         phrases = [f"passage: {p}" for p in df['phrase_proc'].tolist()]
     else:
@@ -149,11 +150,20 @@ def compute_phrase_embeddings(df, batch_size: int = 128):
 
     df.attrs["phrase_embs"] = embeddings
     df.attrs["phrase_embs_norms"] = norms
+    elapsed = time.time() - start_time
+
+    # CPU/RAM текущего процесса
+    process = psutil.Process(os.getpid())
+    cpu = process.cpu_percent(interval=0.1)
+    ram = process.memory_info().rss / (1024 * 1024)
 
     return {
         "model": model.name_for_logs,
         "add_prefix": add_prefix,
         "num_phrases": len(df),
+        "time_sec": round(elapsed, 2),
+        "cpu_percent": cpu,
+        "ram_mb": round(ram, 1)
     }
 
 # ---------- поиск ----------

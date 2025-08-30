@@ -5,7 +5,7 @@ import numpy as np
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")
 
-# Загружаем и обрабатываем Excel
+# Загружаем Excel
 df = load_all_excels()
 
 # Пересчёт эмбеддингов
@@ -16,6 +16,9 @@ with st.sidebar:
     st.write(f"Модель: {log_info['model']}")
     st.write(f"add_prefix: {log_info['add_prefix']}")
     st.write(f"Фраз загружено: {log_info['num_phrases']}")
+    st.write(f"Пересчёт занял: {log_info['time_sec']} сек")
+    st.write(f"CPU (процесс): {log_info['cpu_percent']}%")
+    st.write(f"RAM (процесс): {log_info['ram_mb']} MB")
 
 # 🔘 Фильтр тем
 all_topics = sorted({topic for topics in df['topics'] for topic in topics})
@@ -29,9 +32,9 @@ if selected_topics:
     for row in filtered_df.itertuples():
         with st.container():
             st.markdown(
-                f"""<div style="border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; background-color: #f9f9f9;">
-                    <div style="font-size: 18px; font-weight: 600; color: #333;">📝 {row.phrase_full}</div>
-                    <div style="margin-top: 4px; font-size: 14px; color: #666;">🔖 Тематики: <strong>{', '.join(row.topics)}</strong></div>
+                f"""<div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:12px;background-color:#f9f9f9;">
+                    <div style="font-size:18px;font-weight:600;color:#333;">📝 {row.phrase_full}</div>
+                    <div style="margin-top:4px;font-size:14px;color:#666;">🔖 Тематики: <strong>{', '.join(row.topics)}</strong></div>
                 </div>""",
                 unsafe_allow_html=True
             )
@@ -62,10 +65,10 @@ if query:
         for score, phrase_full, topics, comment in results:
             with st.container():
                 st.markdown(
-                    f"""<div style="border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; background-color: #f9f9f9;">
-                        <div style="font-size: 18px; font-weight: 600; color: #333;">🧠 {phrase_full}</div>
-                        <div style="margin-top: 4px; font-size: 14px; color: #666;">🔖 Тематики: <strong>{', '.join(topics)}</strong></div>
-                        <div style="margin-top: 2px; font-size: 13px; color: #999;">🎯 Релевантность: {score:.2f}</div>
+                    f"""<div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:12px;background-color:#f9f9f9;">
+                        <div style="font-size:18px;font-weight:600;color:#333;">🧠 {phrase_full}</div>
+                        <div style="margin-top:4px;font-size:14px;color:#666;">🔖 Тематики: <strong>{', '.join(topics)}</strong></div>
+                        <div style="margin-top:2px;font-size:13px;color:#999;">🎯 Релевантность: {score:.2f}</div>
                     </div>""",
                     unsafe_allow_html=True
                 )
@@ -82,9 +85,9 @@ if query:
         for phrase, topics, comment in exact_results:
             with st.container():
                 st.markdown(
-                    f"""<div style="border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; background-color: #f9f9f9;">
-                        <div style="font-size: 18px; font-weight: 600; color: #333;">📌 {phrase}</div>
-                        <div style="margin-top: 4px; font-size: 14px; color: #666;">🔖 Тематики: <strong>{', '.join(topics)}</strong></div>
+                    f"""<div style="border:1px solid #e0e0e0;border-radius:12px;padding:16px;margin-bottom:12px;background-color:#f9f9f9;">
+                        <div style="font-size:18px;font-weight:600;color:#333;">📌 {phrase}</div>
+                        <div style="margin-top:4px;font-size:14px;color:#666;">🔖 Тематики: <strong>{', '.join(topics)}</strong></div>
                     </div>""",
                     unsafe_allow_html=True
                 )

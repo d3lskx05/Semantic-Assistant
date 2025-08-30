@@ -31,7 +31,7 @@ def get_model():
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
         print("➡️ Используем fallback: intfloat/multilingual-e5-small")
 
-    return SentenceTransformer("intfloat/multilingual-e5-small")
+    return SentenceTransformer("intfloat/multilingual-e5-base")
 
 @functools.lru_cache(maxsize=1)
 def get_morph():

@@ -7,22 +7,22 @@ st.title("🤖 Проверка фраз")
 
 # Загружаем данные и пересчитываем эмбеддинги
 @st.cache_data(show_spinner=False)
-def get_data():
+def get_data(batch_size: int = 128):
     df = load_all_excels()
-    log_info = compute_phrase_embeddings(df)
+    log_info = compute_phrase_embeddings(df, batch_size=batch_size)
     return df, log_info
 
 df, log_info = get_data()
 
-# ✅ Логирование в sidebar
+# ✅ Логирование в sidebar (можно быстро скрыть)
 with st.sidebar:
-    st.markdown("### 🔍 Отладочная информация")
+    st.markdown("### 🧪 Отладочная информация")
     st.write(f"**Модель:** {log_info['model']}")
     st.write(f"**add_prefix:** {log_info['add_prefix']}")
     st.write(f"**Фраз загружено:** {log_info['num_phrases']}")
     st.write(f"**Пересчёт занял:** {log_info['time_sec']} сек")
-    st.write(f"**CPU:** {log_info['cpu_percent']}%")
-    st.write(f"**RAM:** {log_info['ram_mb']} MB")
+    st.write(f"**CPU (процесс):** {log_info['cpu_percent']}%")
+    st.write(f"**RAM (процесс):** {log_info['ram_mb']} MB")
 
 # 🔘 Все уникальные тематики
 all_topics = sorted({topic for topics in df['topics'] for topic in topics})
@@ -74,7 +74,7 @@ if query:
         if search_df.empty:
             st.warning("Нет данных для поиска по выбранным тематикам.")
         else:
-            # Умный поиск
+            # Умный поиск (семантика)
             results = semantic_search(query, search_df)
             if results:
                 st.markdown("### 🔍 Результаты умного поиска:")
@@ -94,7 +94,7 @@ if query:
             else:
                 st.warning("Совпадений не найдено в умном поиске.")
 
-            # Точный поиск
+            # Точный поиск (ключевые слова)
             exact_results = keyword_search(query, search_df)
             if exact_results:
                 st.markdown("### 🧷 Точный поиск:")

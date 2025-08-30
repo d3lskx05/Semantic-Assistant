@@ -20,7 +20,7 @@ MODEL_CONFIG = {
 def get_model():
     model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
-    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf")
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "")
 
     if os.path.exists(model_path):
         print("✅ Используем локальную модель:", model_path)

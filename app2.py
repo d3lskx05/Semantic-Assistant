@@ -1,5 +1,5 @@
 import streamlit as st
-from utils import load_all_excels, semantic_search, keyword_search, compute_phrase_embeddings, MODEL_CONFIG
+from utils2 import load_all_excels, semantic_search, keyword_search, compute_phrase_embeddings, MODEL_CONFIG
 import numpy as np
 import psutil, os, time
 import torch, transformers, sentence_transformers

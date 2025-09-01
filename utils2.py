@@ -38,7 +38,7 @@ def get_model():
         return SentenceTransformer(model_path)
     except Exception as e:
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        fallback = "intfloat/multilingual-e5-base"
+        fallback = "deepvk/USER-bge-m3"
         print("➡️ Используем fallback:", fallback)
         MODEL_CONFIG["name"] = fallback
         return SentenceTransformer(fallback)

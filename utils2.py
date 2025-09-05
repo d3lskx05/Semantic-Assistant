@@ -11,7 +11,7 @@ import time
 
 # ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "skatzr/Finetune",  # будет заменяться при загрузке
+    "name": "skatzr/Mymodel",  # будет заменяться при загрузке
     "add_prefix": True                        # True = использовать query:/passage:, False = чистый текст
 }
 
@@ -38,7 +38,7 @@ def get_model():
         return SentenceTransformer(model_path)
     except Exception as e:
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        fallback = "skatzr/Finetune"
+        fallback = "skatzr/Mymodel"
         print("➡️ Используем fallback:", fallback)
         MODEL_CONFIG["name"] = fallback
         return SentenceTransformer(fallback)

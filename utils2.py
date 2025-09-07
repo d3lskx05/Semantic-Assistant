@@ -9,36 +9,44 @@ import os
 import numpy as np
 import time
 
+# ---------- глобальные настройки модели ----------
+MODEL_CONFIG = {
+    "name": "DeepVK/USER-BGE-M3",
+    "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
+}
+
+# ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "fine_tuned_model"
-    model_zip = "fine_tuned_model.zip"
-    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "")
-
+    model_path = "USER-BGE-M3"
+    # Если локально модель есть, используем её
     if os.path.exists(model_path):
         print("✅ Используем локальную модель:", model_path)
-        MODEL_CONFIG["deepvk/USER-bge-m3"] = model_path
-        return SentenceTransformer(model_path, device="cuda")
-
-    try:
-        print("📥 Пытаемся загрузить модель с Google Drive...")
-        import gdown, zipfile
-        gdown.download(f"https://drive.google.com/uc?id={gdrive_file_id}", model_zip, quiet=False)
-        with zipfile.ZipFile(model_zip, 'r') as zf:
-            zf.extractall(model_path)
-        print("✅ Модель успешно загружена!")
-        MODEL_CONFIG["deepvk/USER-bge-m3"] = model_path
+        MODEL_CONFIG["name"] = model_path
         return SentenceTransformer(
             model_path,
             device="cuda",
             auto_model_kwargs={
                 "device_map": "auto",
-                "load_in_8bit": True
+                "load_in_8bit": True   # <--- ключ для int8
+            }
+        )
+
+    # Если нет локальной модели — загружаем с HuggingFace
+    try:
+        print("📥 Загружаем модель DeepVK/USER-BGE-M3 с HuggingFace...")
+        MODEL_CONFIG["name"] = "DeepVK/USER-BGE-M3"
+        return SentenceTransformer(
+            "DeepVK/USER-BGE-M3",
+            device="cuda",
+            auto_model_kwargs={
+                "device_map": "auto",
+                "load_in_8bit": True   # <--- int8
             }
         )
     except Exception as e:
-        print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        fallback = "deepvk/USER-bge-m3"
+        print(f"⚠️ Ошибка загрузки модели: {e}")
+        fallback = "skatzr/Mymodel"
         print("➡️ Используем fallback:", fallback)
         MODEL_CONFIG["name"] = fallback
         return SentenceTransformer(

@@ -9,13 +9,6 @@ import os
 import numpy as np
 import time
 
-# ---------- глобальные настройки модели ----------
-MODEL_CONFIG = {
-    "name": "skatzr/Mymodel",  # будет заменяться при загрузке
-    "add_prefix": True                        # True = использовать query:/passage:, False = чистый текст
-}
-
-# ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
     model_path = "fine_tuned_model"
@@ -24,8 +17,8 @@ def get_model():
 
     if os.path.exists(model_path):
         print("✅ Используем локальную модель:", model_path)
-        MODEL_CONFIG["name"] = model_path
-        return SentenceTransformer(model_path)
+        MODEL_CONFIG["deepvk/USER-bge-m3"] = model_path
+        return SentenceTransformer(model_path, device="cuda")
 
     try:
         print("📥 Пытаемся загрузить модель с Google Drive...")
@@ -34,14 +27,28 @@ def get_model():
         with zipfile.ZipFile(model_zip, 'r') as zf:
             zf.extractall(model_path)
         print("✅ Модель успешно загружена!")
-        MODEL_CONFIG["name"] = model_path
-        return SentenceTransformer(model_path)
+        MODEL_CONFIG["deepvk/USER-bge-m3"] = model_path
+        return SentenceTransformer(
+            model_path,
+            device="cuda",
+            auto_model_kwargs={
+                "device_map": "auto",
+                "load_in_8bit": True
+            }
+        )
     except Exception as e:
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        fallback = "skatzr/Mymodel"
+        fallback = "deepvk/USER-bge-m3"
         print("➡️ Используем fallback:", fallback)
         MODEL_CONFIG["name"] = fallback
-        return SentenceTransformer(fallback)
+        return SentenceTransformer(
+            fallback,
+            device="cuda",
+            auto_model_kwargs={
+                "device_map": "auto",
+                "load_in_8bit": True
+            }
+        )
 
 @functools.lru_cache(maxsize=1)
 def get_morph():

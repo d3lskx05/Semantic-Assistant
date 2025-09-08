@@ -10,27 +10,23 @@ import os
 import numpy as np
 import time
 
-# ---------- глобальные настройки модели ----------
-MODEL_CONFIG = {
-    "name": "skatzr/user-bge-m3-onnx-int8",  # твой репозиторий на HF
-    "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
-}
+from sentence_transformers import SentenceTransformer
+import functools
+import os
 
-# ---------- загрузка модели (ONNX + int8) ----------
+MODEL_PATH = "user-bge-m3-onnx-int8"  # папка с подготовленной моделью
+
 @functools.lru_cache(maxsize=1)
 def get_model():
-    hf_repo = MODEL_CONFIG["name"]
-    onnx_file = "model_quantized.onnx"  # файл в репозитории HF
-
-    print(f"📥 Загружаем квантованную модель из HF: {hf_repo}")
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"Папка с ONNX моделью не найдена: {MODEL_PATH}")
+    
     return SentenceTransformer(
-        hf_repo,
+        MODEL_PATH,
         backend="onnx",
-        model_kwargs={
-            "file_name": onnx_file,
-            "provider": "CPUExecutionProvider"
-        }
+        model_kwargs={"file_name": "model_quantized.onnx", "provider": "CPUExecutionProvider"}
     )
+
 
 # ---------- инференс ----------
 def encode_texts(model_dict, texts):

@@ -10,45 +10,33 @@ import numpy as np
 import time
 import zipfile
 
-# ---------- глобальные настройки модели ----------
-MODEL_CONFIG = {
-    "name": "ONNX BGE-M3 GDrive",  # описание
-    "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
-}
-
-# ---------- загрузка и распаковка модели с GDrive ----------
-def download_and_extract_gdrive(file_id, dest_dir="onnx-user-bge-m3"):
-    os.makedirs(dest_dir, exist_ok=True)
-    zip_path = os.path.join(dest_dir, "model.zip")
-    url = f"https://drive.google.com/uc?export=download&id=1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"
-    print(f"📥 Скачиваем модель с GDrive: {url}")
-    r = requests.get(url)
-    if r.status_code != 200:
-        raise ValueError(f"Не удалось скачать файл с GDrive: {r.status_code}")
-    with open(zip_path, "wb") as f:
-        f.write(r.content)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(dest_dir)
-    os.remove(zip_path)
-    print("✅ Модель распакована в:", dest_dir)
-
-# ---------- загрузка модели (ONNX + int8) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    local_path = "onnx-user-bge-m3"
-    onnx_file = "model_quantized.onnx"
-    gdrive_file_id = "1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"  # <-- вставьте свой токен
+    model_path = "fine_tuned_model"
+    model_zip = "fine_tuned_model.zip"
+    file_id = "1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"  # ⬅️ ЗАМЕНИ на свой ID
 
-    # Если локально нет, скачать и распаковать
-    if not os.path.exists(os.path.join(local_path, onnx_file)):
-        download_and_extract_gdrive(gdrive_file_id, local_path)
+    if not os.path.exists(model_path):
+        os.makedirs(model_path, exist_ok=True)
+        print("📥 Скачиваем модель из Google Drive...")
+        gdown.download(f"https://drive.google.com/uc?id={file_id}", model_zip, quiet=False)
 
-    print("✅ Используем локальную ONNX-модель:", local_path)
+        # Проверка и распаковка
+        try:
+            with zipfile.ZipFile(model_zip, 'r') as zip_ref:
+                zip_ref.extractall(model_path)
+            print("✅ Модель распакована в:", model_path)
+        except zipfile.BadZipFile:
+            raise RuntimeError("Ошибка: скачанный файл не является ZIP архивом")
+        finally:
+            os.remove(model_zip)
+
     return SentenceTransformer(
-        local_path,
+        model_path,
         backend="onnx",
-        model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
+        model_kwargs={"file_name": "model_quantized.onnx", "provider": "CPUExecutionProvider"}
     )
+
 
 # ---------- морфология ----------
 @functools.lru_cache(maxsize=1)

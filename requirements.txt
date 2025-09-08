@@ -3,6 +3,7 @@ streamlit
 requests
 pandas
 openpyxl
+psutil
 
 # Morphology
 pymorphy2

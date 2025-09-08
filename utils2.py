@@ -11,7 +11,7 @@ import time
 
 # ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "intfloat/multilingual-e5-base",  # будет заменяться при загрузке
+    "name": "",  # будет заменяться при загрузке
     "add_prefix": True                        # True = использовать query:/passage:, False = чистый текст
 }
 
@@ -20,7 +20,7 @@ MODEL_CONFIG = {
 def get_model():
     model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
-    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "")
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "1lkrvCPIE1wvffIuCSHGtbEz3Epjx5R36")
 
     if os.path.exists(model_path):
         print("✅ Используем локальную модель:", model_path)
@@ -38,7 +38,7 @@ def get_model():
         return SentenceTransformer(model_path)
     except Exception as e:
         print(f"⚠️ Ошибка загрузки с GDrive: {e}")
-        fallback = "intfloat/multilingual-e5-base"
+        fallback = "skatzr/user-bge-m3-onnx-int8"
         print("➡️ Используем fallback:", fallback)
         MODEL_CONFIG["name"] = fallback
         return SentenceTransformer(fallback)

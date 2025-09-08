@@ -1,7 +1,17 @@
-import streamlit as st
-from utils2 import load_all_excels, semantic_search, keyword_search, compute_phrase_embeddings, MODEL_CONFIG
+# app.py
+import os
+import time
+import psutil
 import numpy as np
-import psutil, os, time
+import streamlit as st
+
+from utils2 import (
+    load_all_excels,
+    semantic_search,
+    keyword_search,
+    compute_phrase_embeddings,
+    MODEL_CONFIG
+)
 
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")

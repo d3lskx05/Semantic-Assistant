@@ -20,7 +20,7 @@ MODEL_CONFIG = {
 def download_and_extract_gdrive(file_id, dest_dir="onnx-user-bge-m3"):
     os.makedirs(dest_dir, exist_ok=True)
     zip_path = os.path.join(dest_dir, "model.zip")
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    url = f"https://drive.google.com/uc?export=download&id=1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"
     print(f"📥 Скачиваем модель с GDrive: {url}")
     r = requests.get(url)
     if r.status_code != 200:

@@ -2,7 +2,8 @@ import pandas as pd
 import requests
 import re
 from io import BytesIO
-from sentence_transformers import SentenceTransformer
+import onnxruntime as ort
+from transformers import AutoTokenizer
 import pymorphy2
 import functools
 import os
@@ -15,39 +16,44 @@ MODEL_CONFIG = {
     "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
 }
 
-# ---------- загрузка модели ----------
+# ---------- загрузка модели (ONNX + int8) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    # 🔹 Локальная папка с моделью (если скачана заранее)
     model_path = "onnx-user-bge-m3"
     onnx_file = "model_quantized.onnx"
     hf_repo = "skatzr/user-bge-m3-onnx-int8"  # <-- твой репозиторий на HF
 
-    if os.path.exists(model_path):
+    # Если локальная модель есть
+    if os.path.exists(os.path.join(model_path, onnx_file)):
         print("✅ Используем локальную ONNX-модель:", model_path)
-        MODEL_CONFIG["name"] = model_path
-        return SentenceTransformer(
-            model_path,
-            backend="onnx",
-            model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        session = ort.InferenceSession(
+            os.path.join(model_path, onnx_file),
+            providers=["CPUExecutionProvider"]
         )
+        return {"tokenizer": tokenizer, "session": session}
 
-    # 🔹 Если локальной модели нет — грузим с Hugging Face (тоже ONNX)
-    try:
-        print(f"📥 Загружаем модель из HF: {hf_repo}")
-        MODEL_CONFIG["name"] = hf_repo
-        return SentenceTransformer(
-            hf_repo,
-            backend="onnx",
-            model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
-        )
-    except Exception as e:
-        print(f"⚠️ Ошибка загрузки модели: {e}")
-        fallback = "DeepVK/USER-BGE-M3"
-        print(f"➡️ Используем fallback PyTorch: {fallback}")
-        MODEL_CONFIG["name"] = fallback
-        return SentenceTransformer(fallback)
+    # Если локальной нет — пробуем с HF
+    print(f"📥 Загружаем модель из HF: {hf_repo}")
+    tokenizer = AutoTokenizer.from_pretrained(hf_repo)
+    session = ort.InferenceSession(
+        os.path.join(hf_repo, onnx_file),
+        providers=["CPUExecutionProvider"]
+    )
+    return {"tokenizer": tokenizer, "session": session}
 
+# ---------- инференс ----------
+def encode_texts(model_dict, texts):
+    tokenizer = model_dict["tokenizer"]
+    session = model_dict["session"]
+
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="np")
+    outputs = session.run(None, dict(inputs))
+
+    embeddings = outputs[0]
+    return embeddings.astype("float32")
+
+# ---------- морфология ----------
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
@@ -139,7 +145,7 @@ def load_all_excels():
 
 # ---------- пересчёт эмбеддингов ----------
 def compute_phrase_embeddings(df, batch_size: int = 128):
-    model = get_model()
+    model_dict = get_model()
     start = time.time()
 
     if MODEL_CONFIG["add_prefix"]:
@@ -150,17 +156,18 @@ def compute_phrase_embeddings(df, batch_size: int = 128):
     embeddings_list = []
     for i in range(0, len(phrases), batch_size):
         batch = phrases[i:i+batch_size]
-        batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
-        embeddings_list.append(batch_embs.astype("float32"))
+        batch_embs = encode_texts(model_dict, batch)
+        embeddings_list.append(batch_embs)
 
-    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype="float32")
+    emb_dim = embeddings_list[0].shape[1] if embeddings_list else 0
+    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, emb_dim), dtype="float32")
 
     norms = np.linalg.norm(embeddings, axis=1)
     norms[norms == 0] = 1e-10
 
     df.attrs["phrase_embs"] = embeddings
     df.attrs["phrase_embs_norms"] = norms
-    df.attrs["emb_dim"] = embeddings.shape[1] if embeddings.size else 0
+    df.attrs["emb_dim"] = emb_dim
     df.attrs["embedding_time"] = time.time() - start
     return df
 
@@ -182,7 +189,7 @@ def deduplicate_results(results):
 
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.4):
-    model = get_model()
+    model_dict = get_model()
     query_proc = preprocess(query)
 
     if MODEL_CONFIG["add_prefix"]:
@@ -190,7 +197,7 @@ def semantic_search(query, df, top_k=5, threshold=0.4):
     else:
         query_text = query_proc
 
-    query_emb = model.encode(query_text, convert_to_numpy=True, show_progress_bar=False).astype("float32")
+    query_emb = encode_texts(model_dict, [query_text])[0]
 
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)

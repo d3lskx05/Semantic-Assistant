@@ -1,12 +1,12 @@
 import streamlit as st
-from utils import load_all_excels, semantic_search, keyword_search, compute_phrase_embeddings, MODEL_CONFIG
+from utils2 import load_all_excels, semantic_search, keyword_search, compute_phrase_embeddings, MODEL_CONFIG
 import numpy as np
 import psutil, os, time
-import torch, transformers, sentence_transformers
 
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")
 
+# ---------- загрузка и кэширование данных ----------
 @st.cache_data(show_spinner=False)
 def get_data():
     df = load_all_excels()
@@ -15,13 +15,11 @@ def get_data():
 
 df = get_data()
 
-# 📊 Блок отладки в sidebar
+# ---------- блок отладки sidebar ----------
 with st.sidebar:
     st.markdown("### ⚙️ Отладка")
-
     st.write("Модель:", MODEL_CONFIG["name"])
     st.write("Префиксы:", MODEL_CONFIG["add_prefix"])
-
     st.write("Фраз загружено:", len(df))
     st.write("Кол-во тем:", len({t for ts in df['topics'] for t in ts}))
     st.write("Размерность эмбеддингов:", df.attrs.get("emb_dim", "-"))
@@ -44,11 +42,7 @@ with st.sidebar:
     st.write(f"CPU: {cpu}%")
     st.write(f"RAM: {ram.percent}% ({mem_info.rss/1024**2:.1f} MB)")
 
-    st.write("Torch:", torch.__version__)
-    st.write("Transformers:", transformers.__version__)
-    st.write("Sentence-Transformers:", sentence_transformers.__version__)
-
-# 🔘 Фильтр по тематикам
+# ---------- фильтр по тематикам ----------
 all_topics = sorted({topic for topics in df['topics'] for topic in topics})
 selected_topics = st.multiselect("Фильтр по тематикам (независимо от поиска):", all_topics)
 filter_search_by_topics = st.checkbox("Искать только в выбранных тематиках", value=False)
@@ -67,7 +61,7 @@ if selected_topics:
                 with st.expander("💬 Комментарий", expanded=False):
                     st.markdown(row.comment)
 
-# 📥 Поисковый запрос
+# ---------- поисковый запрос ----------
 query = st.text_input("Введите ваш запрос:")
 
 if query:

@@ -11,7 +11,7 @@ import time
 
 # ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "skatzr/user-bge-m3-onnx-int8",  # твой репозиторий на HF
+    "name": "skatzr/user-bge-m3-onnx-int8",  # репозиторий на HF
     "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
 }
 
@@ -19,9 +19,8 @@ MODEL_CONFIG = {
 @functools.lru_cache(maxsize=1)
 def get_model():
     hf_repo = MODEL_CONFIG["name"]
-    onnx_file = "model_quantized.onnx"  # файл в репозитории HF или локальной папке
+    onnx_file = "model_quantized.onnx"
 
-    # Локальная папка, если заранее скачана
     local_path = "onnx-user-bge-m3"
     if os.path.exists(os.path.join(local_path, onnx_file)):
         print("✅ Используем локальную ONNX-модель:", local_path)
@@ -31,7 +30,6 @@ def get_model():
             model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
         )
 
-    # Иначе загружаем с HF
     print(f"📥 Загружаем квантованную модель из HF: {hf_repo}")
     return SentenceTransformer(
         hf_repo,
@@ -39,24 +37,11 @@ def get_model():
         model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
     )
 
-
-# ---------- инференс ----------
-def encode_texts(model_dict, texts):
-    tokenizer = model_dict["tokenizer"]
-    session = model_dict["session"]
-
-    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="np")
-    outputs = session.run(None, dict(inputs))
-
-    embeddings = outputs[0]
-    return embeddings.astype("float32")
-
 # ---------- морфология ----------
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
 
-# ---------- служебные функции ----------
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 
@@ -143,7 +128,7 @@ def load_all_excels():
 
 # ---------- пересчёт эмбеддингов ----------
 def compute_phrase_embeddings(df, batch_size: int = 128):
-    model_dict = get_model()
+    model = get_model()
     start = time.time()
 
     if MODEL_CONFIG["add_prefix"]:
@@ -154,18 +139,17 @@ def compute_phrase_embeddings(df, batch_size: int = 128):
     embeddings_list = []
     for i in range(0, len(phrases), batch_size):
         batch = phrases[i:i+batch_size]
-        batch_embs = encode_texts(model_dict, batch)
-        embeddings_list.append(batch_embs)
+        batch_embs = model.encode(batch, convert_to_numpy=True, show_progress_bar=False)
+        embeddings_list.append(batch_embs.astype("float32"))
 
-    emb_dim = embeddings_list[0].shape[1] if embeddings_list else 0
-    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, emb_dim), dtype="float32")
+    embeddings = np.vstack(embeddings_list) if embeddings_list else np.zeros((0, model.get_sentence_embedding_dimension()), dtype="float32")
 
     norms = np.linalg.norm(embeddings, axis=1)
     norms[norms == 0] = 1e-10
 
     df.attrs["phrase_embs"] = embeddings
     df.attrs["phrase_embs_norms"] = norms
-    df.attrs["emb_dim"] = emb_dim
+    df.attrs["emb_dim"] = embeddings.shape[1] if embeddings.size else 0
     df.attrs["embedding_time"] = time.time() - start
     return df
 
@@ -187,7 +171,7 @@ def deduplicate_results(results):
 
 # ---------- поиск ----------
 def semantic_search(query, df, top_k=5, threshold=0.4):
-    model_dict = get_model()
+    model = get_model()
     query_proc = preprocess(query)
 
     if MODEL_CONFIG["add_prefix"]:
@@ -195,7 +179,7 @@ def semantic_search(query, df, top_k=5, threshold=0.4):
     else:
         query_text = query_proc
 
-    query_emb = encode_texts(model_dict, [query_text])[0]
+    query_emb = model.encode(query_text, convert_to_numpy=True, show_progress_bar=False).astype("float32")
 
     phrase_embs = df.attrs.get("phrase_embs", None)
     phrase_norms = df.attrs.get("phrase_embs_norms", None)

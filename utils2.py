@@ -18,45 +18,35 @@ MODEL_CONFIG = {
 # ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "USER-BGE-M3"
-    # Если локально модель есть, используем её
+    # 🔹 Локальная папка с моделью (если скачана заранее)
+    model_path = "onnx-user-bge-m3"
+    onnx_file = "model_quantized.onnx"
+    hf_repo = "skatzr/user-bge-m3-onnx-int8"  # <-- твой репозиторий на HF
+
     if os.path.exists(model_path):
-        print("✅ Используем локальную модель:", model_path)
+        print("✅ Используем локальную ONNX-модель:", model_path)
         MODEL_CONFIG["name"] = model_path
         return SentenceTransformer(
             model_path,
-            device="cuda",
-            auto_model_kwargs={
-                "device_map": "auto",
-                "load_in_8bit": True   # <--- ключ для int8
-            }
+            backend="onnx",
+            model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
         )
 
-    # Если нет локальной модели — загружаем с HuggingFace
+    # 🔹 Если локальной модели нет — грузим с Hugging Face (тоже ONNX)
     try:
-        print("📥 Загружаем модель DeepVK/USER-BGE-M3 с HuggingFace...")
-        MODEL_CONFIG["name"] = "DeepVK/USER-BGE-M3"
+        print(f"📥 Загружаем модель из HF: {hf_repo}")
+        MODEL_CONFIG["name"] = hf_repo
         return SentenceTransformer(
-            "DeepVK/USER-BGE-M3",
-            device="cuda",
-            auto_model_kwargs={
-                "device_map": "auto",
-                "load_in_8bit": True   # <--- int8
-            }
+            hf_repo,
+            backend="onnx",
+            model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
         )
     except Exception as e:
         print(f"⚠️ Ошибка загрузки модели: {e}")
-        fallback = "skatzr/Mymodel"
-        print("➡️ Используем fallback:", fallback)
+        fallback = "DeepVK/USER-BGE-M3"
+        print(f"➡️ Используем fallback PyTorch: {fallback}")
         MODEL_CONFIG["name"] = fallback
-        return SentenceTransformer(
-            fallback,
-            device="cuda",
-            auto_model_kwargs={
-                "device_map": "auto",
-                "load_in_8bit": True
-            }
-        )
+        return SentenceTransformer(fallback)
 
 @functools.lru_cache(maxsize=1)
 def get_morph():

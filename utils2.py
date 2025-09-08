@@ -8,55 +8,46 @@ import functools
 import os
 import numpy as np
 import time
-import zipfile
 
-
-import os
-import zipfile
-import functools
-import gdown
-from sentence_transformers import SentenceTransformer
-
+# ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "ONNX BGE-M3 GDrive",
-    "add_prefix": True
+    "name": "intfloat/multilingual-e5-base",  # будет заменяться при загрузке
+    "add_prefix": True                        # True = использовать query:/passage:, False = чистый текст
 }
 
+# ---------- загрузка модели ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "onnx-user-bge-m3"
-    model_zip = "model.zip"
-    file_id = "1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"  # токен файла
+    model_path = "fine_tuned_model"
+    model_zip = "fine_tuned_model.zip"
+    gdrive_file_id = os.getenv("GDRIVE_MODEL_ID", "")
 
-    # Если модель ещё не распакована
-    if not os.path.exists(os.path.join(model_path, "model_quantized.onnx")):
-        os.makedirs(model_path, exist_ok=True)
+    if os.path.exists(model_path):
+        print("✅ Используем локальную модель:", model_path)
+        MODEL_CONFIG["name"] = model_path
+        return SentenceTransformer(model_path)
 
-        # Скачиваем ZIP
-        if not os.path.exists(model_zip):
-            url = f"https://drive.google.com/uc?id={file_id}"
-            print(f"📥 Скачиваем модель с GDrive: {url}")
-            gdown.download(url, model_zip, quiet=False)
+    try:
+        print("📥 Пытаемся загрузить модель с Google Drive...")
+        import gdown, zipfile
+        gdown.download(f"https://drive.google.com/uc?id={gdrive_file_id}", model_zip, quiet=False)
+        with zipfile.ZipFile(model_zip, 'r') as zf:
+            zf.extractall(model_path)
+        print("✅ Модель успешно загружена!")
+        MODEL_CONFIG["name"] = model_path
+        return SentenceTransformer(model_path)
+    except Exception as e:
+        print(f"⚠️ Ошибка загрузки с GDrive: {e}")
+        fallback = "intfloat/multilingual-e5-base"
+        print("➡️ Используем fallback:", fallback)
+        MODEL_CONFIG["name"] = fallback
+        return SentenceTransformer(fallback)
 
-        # Распаковываем ZIP
-        with zipfile.ZipFile(model_zip, 'r') as zip_ref:
-            zip_ref.extractall(model_path)
-        os.remove(model_zip)
-        print(f"✅ Модель распакована в {model_path}")
-
-    # Загружаем модель
-    return SentenceTransformer(
-        model_path,
-        backend="onnx",
-        model_kwargs={"file_name": "model_quantized.onnx", "provider": "CPUExecutionProvider"}
-    )
-
-
-# ---------- морфология ----------
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
 
+# ---------- служебные функции ----------
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 

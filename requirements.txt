@@ -4,6 +4,7 @@ requests
 pandas
 openpyxl
 psutil
+sentence_transformers
 
 # Morphology
 pymorphy2

@@ -2,29 +2,41 @@ import pandas as pd
 import requests
 import re
 from io import BytesIO
-import onnxruntime as ort
-from transformers import AutoTokenizer
+from sentence_transformers import SentenceTransformer
 import pymorphy2
 import functools
 import os
 import numpy as np
 import time
 
-from sentence_transformers import SentenceTransformer
-import functools
-import os
+# ---------- глобальные настройки модели ----------
+MODEL_CONFIG = {
+    "name": "skatzr/user-bge-m3-onnx-int8",  # твой репозиторий на HF
+    "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
+}
 
-MODEL_PATH = "user-bge-m3-onnx-int8"  # папка с подготовленной моделью
-
+# ---------- загрузка модели (ONNX + int8) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Папка с ONNX моделью не найдена: {MODEL_PATH}")
-    
+    hf_repo = MODEL_CONFIG["name"]
+    onnx_file = "model_quantized.onnx"  # файл в репозитории HF или локальной папке
+
+    # Локальная папка, если заранее скачана
+    local_path = "onnx-user-bge-m3"
+    if os.path.exists(os.path.join(local_path, onnx_file)):
+        print("✅ Используем локальную ONNX-модель:", local_path)
+        return SentenceTransformer(
+            local_path,
+            backend="onnx",
+            model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
+        )
+
+    # Иначе загружаем с HF
+    print(f"📥 Загружаем квантованную модель из HF: {hf_repo}")
     return SentenceTransformer(
-        MODEL_PATH,
+        hf_repo,
         backend="onnx",
-        model_kwargs={"file_name": "model_quantized.onnx", "provider": "CPUExecutionProvider"}
+        model_kwargs={"file_name": onnx_file, "provider": "CPUExecutionProvider"}
     )
 
 

@@ -10,6 +10,12 @@ import numpy as np
 import time
 import zipfile
 
+
+# ---------- глобальные настройки модели ----------
+MODEL_CONFIG = {
+    "name": "ONNX BGE-M3 GDrive",  # описание
+    "add_prefix": True
+}
 @functools.lru_cache(maxsize=1)
 def get_model():
     model_path = "fine_tuned_model"

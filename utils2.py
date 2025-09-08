@@ -20,7 +20,7 @@ MODEL_CONFIG = {
 def get_model():
     model_path = "fine_tuned_model"
     model_zip = "fine_tuned_model.zip"
-    file_id = "1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"  # ⬅️ ЗАМЕНИ на свой ID
+    file_id = "1lkrvCPIE1wvffIuCSHGtbEz3Epjx5R36"  # ⬅️ ЗАМЕНИ на свой ID
 
     if not os.path.exists(model_path):
         os.makedirs(model_path, exist_ok=True)

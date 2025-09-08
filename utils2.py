@@ -12,35 +12,25 @@ import time
 
 # ---------- глобальные настройки модели ----------
 MODEL_CONFIG = {
-    "name": "DeepVK/USER-BGE-M3",
+    "name": "skatzr/user-bge-m3-onnx-int8",  # твой репозиторий на HF
     "add_prefix": True  # True = использовать query:/passage:, False = чистый текст
 }
 
 # ---------- загрузка модели (ONNX + int8) ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "onnx-user-bge-m3"
-    onnx_file = "model_quantized.onnx"
-    hf_repo = "skatzr/user-bge-m3-onnx-int8"  # <-- твой репозиторий на HF
+    hf_repo = MODEL_CONFIG["name"]
+    onnx_file = "model_quantized.onnx"  # файл в репозитории HF
 
-    # Если локальная модель есть
-    if os.path.exists(os.path.join(model_path, onnx_file)):
-        print("✅ Используем локальную ONNX-модель:", model_path)
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        session = ort.InferenceSession(
-            os.path.join(model_path, onnx_file),
-            providers=["CPUExecutionProvider"]
-        )
-        return {"tokenizer": tokenizer, "session": session}
-
-    # Если локальной нет — пробуем с HF
-    print(f"📥 Загружаем модель из HF: {hf_repo}")
-    tokenizer = AutoTokenizer.from_pretrained(hf_repo)
-    session = ort.InferenceSession(
-        os.path.join(hf_repo, onnx_file),
-        providers=["CPUExecutionProvider"]
+    print(f"📥 Загружаем квантованную модель из HF: {hf_repo}")
+    return SentenceTransformer(
+        hf_repo,
+        backend="onnx",
+        model_kwargs={
+            "file_name": onnx_file,
+            "provider": "CPUExecutionProvider"
+        }
     )
-    return {"tokenizer": tokenizer, "session": session}
 
 # ---------- инференс ----------
 def encode_texts(model_dict, texts):

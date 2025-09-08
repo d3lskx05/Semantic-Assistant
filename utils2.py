@@ -11,32 +11,40 @@ import time
 import zipfile
 
 
-# ---------- глобальные настройки модели ----------
+import os
+import zipfile
+import functools
+import gdown
+from sentence_transformers import SentenceTransformer
+
 MODEL_CONFIG = {
-    "name": "ONNX BGE-M3 GDrive",  # описание
+    "name": "ONNX BGE-M3 GDrive",
     "add_prefix": True
 }
+
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "fine_tuned_model"
-    model_zip = "fine_tuned_model.zip"
-    file_id = "1lkrvCPIE1wvffIuCSHGtbEz3Epjx5R36"  # ⬅️ ЗАМЕНИ на свой ID
+    model_path = "onnx-user-bge-m3"
+    model_zip = "model.zip"
+    file_id = "1J0nuvB3kR5JZ2kW5qAFr1og5eSax8q9E"  # токен файла
 
-    if not os.path.exists(model_path):
+    # Если модель ещё не распакована
+    if not os.path.exists(os.path.join(model_path, "model_quantized.onnx")):
         os.makedirs(model_path, exist_ok=True)
-        print("📥 Скачиваем модель из Google Drive...")
-        gdown.download(f"https://drive.google.com/uc?id={file_id}", model_zip, quiet=False)
 
-        # Проверка и распаковка
-        try:
-            with zipfile.ZipFile(model_zip, 'r') as zip_ref:
-                zip_ref.extractall(model_path)
-            print("✅ Модель распакована в:", model_path)
-        except zipfile.BadZipFile:
-            raise RuntimeError("Ошибка: скачанный файл не является ZIP архивом")
-        finally:
-            os.remove(model_zip)
+        # Скачиваем ZIP
+        if not os.path.exists(model_zip):
+            url = f"https://drive.google.com/uc?id={file_id}"
+            print(f"📥 Скачиваем модель с GDrive: {url}")
+            gdown.download(url, model_zip, quiet=False)
 
+        # Распаковываем ZIP
+        with zipfile.ZipFile(model_zip, 'r') as zip_ref:
+            zip_ref.extractall(model_path)
+        os.remove(model_zip)
+        print(f"✅ Модель распакована в {model_path}")
+
+    # Загружаем модель
     return SentenceTransformer(
         model_path,
         backend="onnx",

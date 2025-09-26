@@ -9,28 +9,16 @@ import functools
 import os
 
 # ---------- модель и морфологический разбор ----------
-
 @functools.lru_cache(maxsize=1)
 def get_model():
-    model_path = "fine_tuned_model"
-    model_zip  = "fine_tuned_model.zip"
-    file_id    = "1RR15OMLj9vfSrVa1HN-dRU-4LbkdbRRf"  # при необходимости замените
-
-    if not os.path.exists(model_path):
-        import gdown
-        import zipfile
-        gdown.download(f"https://drive.google.com/uc?id={file_id}", model_zip, quiet=False)
-        with zipfile.ZipFile(model_zip, 'r') as zf:
-            zf.extractall(model_path)
-
-    return SentenceTransformer(model_path)
+    hf_model_id = "skatzR/USER-BGE-M3-MiniLM-L12-v2-Distilled"
+    return SentenceTransformer(hf_model_id)
 
 @functools.lru_cache(maxsize=1)
 def get_morph():
     return pymorphy2.MorphAnalyzer()
 
 # ---------- служебные функции ----------
-
 def preprocess(text):
     return re.sub(r"\s+", " ", str(text).lower().strip())
 
@@ -42,7 +30,6 @@ def lemmatize_cached(word):
     return lemmatize(word)
 
 SYNONYM_GROUPS = []
-
 SYNONYM_DICT = {}
 for group in SYNONYM_GROUPS:
     lemmas = {lemmatize(w.lower()) for w in group}
@@ -57,7 +44,7 @@ GITHUB_CSV_URLS = [
 
 def split_by_slash(phrase: str):
     phrase = phrase.strip()
-    parts  = []
+    parts = []
     for segment in phrase.split("|"):
         segment = segment.strip()
         if "/" in segment:
@@ -66,10 +53,10 @@ def split_by_slash(phrase: str):
                 m = re.match(r"^(.*?\b)?(\w+)\s*/\s*(\w+)(\b.*?)?$", segment)
                 if m:
                     prefix = (m.group(1) or "").strip()
-                    first  = m.group(2).strip()
+                    first = m.group(2).strip()
                     second = m.group(3).strip()
                     suffix = (m.group(4) or "").strip()
-                    parts.append(" ".join(filter(None, [prefix, first,  suffix])))
+                    parts.append(" ".join(filter(None, [prefix, first, suffix])))
                     parts.append(" ".join(filter(None, [prefix, second, suffix])))
                     continue
             parts.extend(tokens)
@@ -81,27 +68,22 @@ def load_excel(url):
     resp = requests.get(url)
     if resp.status_code != 200:
         raise ValueError(f"Ошибка загрузки {url}")
-
     df = pd.read_excel(BytesIO(resp.content))
     topic_cols = [c for c in df.columns if c.lower().startswith("topics")]
     if not topic_cols:
         raise KeyError("Не найдены колонки topics")
-
-    df["topics"]      = df[topic_cols].astype(str).agg(lambda x: [v for v in x if v and v != "nan"], axis=1)
+    df["topics"] = df[topic_cols].astype(str).agg(lambda x: [v for v in x if v and v != "nan"], axis=1)
     df["phrase_full"] = df["phrase"]
     df["phrase_list"] = df["phrase"].apply(split_by_slash)
-    df                = df.explode("phrase_list", ignore_index=True)
-    df["phrase"]      = df["phrase_list"]
+    df = df.explode("phrase_list", ignore_index=True)
+    df["phrase"] = df["phrase_list"]
     df["phrase_proc"] = df["phrase"].apply(preprocess)
     df["phrase_lemmas"] = df["phrase_proc"].apply(
         lambda t: {lemmatize_cached(w) for w in re.findall(r"\w+", t)}
     )
-
-    # Можно сохранить датафрейм с вычисленными эмбеддингами на диск (pickle/NumPy) для повторного использования:contentReference[oaicite:6]{index=6}:contentReference[oaicite:7]{index=7}.
-
+    # Эмбеддинги вычисляются в load_all_excels() для всего датасета
     if "comment" not in df.columns:
         df["comment"] = ""
-
     return df[["phrase", "phrase_proc", "phrase_full", "phrase_lemmas", "topics", "comment"]]
 
 def load_all_excels():
@@ -113,10 +95,15 @@ def load_all_excels():
             print(f"⚠️ Ошибка с {url}: {e}")
     if not dfs:
         raise ValueError("Не удалось загрузить ни одного файла")
-    return pd.concat(dfs, ignore_index=True)
+    df = pd.concat(dfs, ignore_index=True)
+    
+    # Вычисляем эмбеддинги для семантического поиска (один раз)
+    model = get_model()
+    df.attrs["phrase_embs"] = model.encode(df["phrase_proc"].tolist(), convert_to_tensor=True)
+    
+    return df
 
 # ---------- удаление дублей ----------
-
 def _score_of(item):
     """Возвращает числовой score из кортежа результата."""
     return item[0] if len(item) == 4 else 1.0
@@ -133,21 +120,18 @@ def deduplicate_results(results):
     """
     best = {}
     for item in results:
-        key   = _phrase_full_of(item)
+        key = _phrase_full_of(item)
         score = _score_of(item)
-
         if key not in best or score > _score_of(best[key]):
             best[key] = item
     return list(best.values())
 
 # ---------- поиск ----------
-
 def semantic_search(query, df, top_k=5, threshold=0.5):
-    model       = get_model()
-    query_proc  = preprocess(query)
-    query_emb   = model.encode(query_proc, convert_to_tensor=True)
+    model = get_model()
+    query_proc = preprocess(query)
+    query_emb = model.encode(query_proc, convert_to_tensor=True)
     phrase_embs = df.attrs["phrase_embs"]
-
     sims = util.pytorch_cos_sim(query_emb, phrase_embs)[0]
     results = [
         (float(score), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
@@ -157,10 +141,9 @@ def semantic_search(query, df, top_k=5, threshold=0.5):
     return deduplicate_results(results)
 
 def keyword_search(query, df):
-    query_proc  = preprocess(query)
+    query_proc = preprocess(query)
     query_words = re.findall(r"\w+", query_proc)
     query_lemmas = [lemmatize_cached(w) for w in query_words]
-
     matched = []
     for row in df.itertuples():
         lemma_match = all(
@@ -170,15 +153,12 @@ def keyword_search(query, df):
         partial_match = all(q in row.phrase_proc for q in query_words)
         if lemma_match or partial_match:
             matched.append((row.phrase_full, row.topics, row.comment))
-
     return deduplicate_results(matched)
 
 # ---------- фильтрация (если понадобится) ----------
-
 def filter_by_topics(results, selected_topics):
     if not selected_topics:
         return results
-
     filtered = []
     for item in results:
         if isinstance(item, tuple) and len(item) == 4:

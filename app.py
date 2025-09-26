@@ -114,7 +114,6 @@ with tab1:
 with tab2:
     st.markdown("### 🚫 Тематики, которые **не используем**")
     unused_topics = [
-        unused_topics = [
         "Local_Balance_Transfer",
         "Local_Friends",
         "Local_Next_Payment",

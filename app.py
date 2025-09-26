@@ -123,6 +123,21 @@ with tab2:
 
 
 # ============= TAB 3: ДА/НЕТ =============
+def render_phrases_grid(phrases, cols=3, color="#e0f7fa"):
+    rows = [phrases[i:i+cols] for i in range(0, len(phrases), cols)]
+    for row in rows:
+        cols_streamlit = st.columns(cols)
+        for col, phrase in zip(cols_streamlit, row):
+            col.markdown(
+                f"""<div style="background-color:{color};
+                                padding:6px 10px;
+                                border-radius:12px;
+                                display:inline-block;
+                                margin:4px;
+                                font-size:14px;">{phrase}</div>""",
+                unsafe_allow_html=True
+            )
+
 with tab3:
     st.markdown("### ✅ Интерпретации 'ДА'")
     yes_phrases = [
@@ -132,8 +147,7 @@ with tab3:
         "Подскажите", "Расскажи", "Скажи", "Проверил", "Давал",
         "Я могу", "У меня вопрос есть", "Сказал", "Проконсультируйте", "Пробовала"
     ]
-    for phrase in yes_phrases:
-        st.markdown(f"- {phrase}")
+    render_phrases_grid(yes_phrases, cols=3, color="#d1f5d3")
 
     st.markdown("---")
 
@@ -141,5 +155,4 @@ with tab3:
     no_phrases = [
         "Не надо", "Не хочу", "Не готов", "Не помню", "Не пробовала"
     ]
-    for phrase in no_phrases:
-        st.markdown(f"- {phrase}")
+    render_phrases_grid(no_phrases, cols=3, color="#f9d6d5")

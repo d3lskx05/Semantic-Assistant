@@ -7,3 +7,4 @@ requests
 pymorphy2
 gdown
 torch
+psutil

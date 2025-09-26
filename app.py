@@ -114,13 +114,29 @@ with tab1:
 with tab2:
     st.markdown("### 🚫 Тематики, которые **не используем**")
     unused_topics = [
-        "Пример тематики 1",
-        "Пример тематики 2",
-        "Пример тематики 3"
+        unused_topics = [
+        "Local_Balance_Transfer",
+        "Local_Friends",
+        "Local_Next_Payment",
+        "Local_Order_Cash",
+        "Local_Other_Cashback"
+        "Local_RemittanceStatus",
+        "Подожди (Wait)",
+        "Local_X5",
+        "PassportChangeFirst",
+        "PassportChangeSecond",
+        "Меньше (Local_Less)",
+        "Больше (Local_More)",
+        "Рефинансирование под залог недвижимости (Local_Secured_Refinancing)",
+        "Действующий займ (Local_Current_MFO_2)",
+        "General Мои кредитные предложения (General_My_loan_offers)",
+        "Настроить/Изменить/Восстановить (Local_Setup_Secret_Code)",
+        "Как сделать устройство доверенным (Local_Trusted_Device)",
+        "Что такое доверенное устройство (Local_About_Trusted_Device)",
+        "Что такое секретный код (Local_About_Secret_Code)"
     ]
     for topic in unused_topics:
         st.markdown(f"- {topic}")
-
 
 # ============= TAB 3: ДА/НЕТ =============
 def render_phrases_grid(phrases, cols=3, color="#e0f7fa"):
